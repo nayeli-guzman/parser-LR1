@@ -1,3 +1,123 @@
+# parser_ll1.py
+from __future__ import annotations
+from typing import List
+from table import Table, Symbol, TERMINAL, NONTERMINAL
+
+class LL1Parser:
+    def __init__(self, table: Table, start_symbol_id: int) -> None:
+        self.table = table
+        self.startSymbol = start_symbol_id
+
+    def parse(self, tokens: List[str]) -> bool:
+        # Convertir tokens a IDs de terminales
+        input_ids: List[int] = []
+        for tok in tokens:
+            tid = self.table.getTerminalId(tok)
+            if tid < 0:
+                print(f"[Parser] Token desconocido: {tok}")
+                return False
+            input_ids.append(tid)
+
+        # Asegurar fin de entrada $
+        dollar_id = self.table.getTerminalId("$")
+        if not input_ids or input_ids[-1] != dollar_id:
+            input_ids.append(dollar_id)
+
+        # Pila: [$, Start]
+        stack: List[Symbol] = []
+        stack.append(Symbol(TERMINAL, dollar_id))
+        stack.append(Symbol(NONTERMINAL, self.startSymbol))
+
+        ip = 0  # índice de lectura
+
+        # Anchos para impresión (similar a setw)
+        width_pila = 25
+        width_entrada = 25
+        width_regla = 30
+
+        def pad(s: str, w: int) -> str:
+            return f"{s:<{w}}"
+
+        print("\n=== Tabla de derivación ===")
+        print(
+            pad("Pila", width_pila)
+            + pad("Entrada", width_entrada)
+            + pad("Regla aplicada", width_regla)
+        )
+        print("-" * (width_pila + width_entrada + width_regla))
+
+        def stack_to_str(stk: List[Symbol]) -> str:
+            # Mostrar de base a cima (igual que tu C++)
+            names: List[str] = []
+            for s in stk:
+                names.append(self.table.ntsVec[s.value] if s.type == NONTERMINAL else self.table.tsVec[s.value])
+            return " ".join(names)
+
+        def input_rest_to_str(ids: List[int], start: int) -> str:
+            return " ".join(self.table.tsVec[i] for i in ids[start:])
+
+        while stack:
+            top = stack[-1]
+            lookahead = input_ids[ip]
+
+            pila_str = stack_to_str(stack)
+            entrada_str = input_rest_to_str(input_ids, ip)
+
+            if top.type == TERMINAL:
+                top_name = self.table.tsVec[top.value]
+                la_name = self.table.tsVec[lookahead]
+
+                if top.value == lookahead or top_name == "''":
+                    # Match
+                    print(
+                        pad(pila_str, width_pila)
+                        + pad(entrada_str, width_entrada)
+                        + pad(f"Match: {top_name}", width_regla)
+                    )
+                    stack.pop()
+                    # Avanzar input salvo epsilon
+                    if top_name != "''":
+                        ip += 1
+                else:
+                    print(f"[Parser] Error: esperaba '{top_name}' pero llegó '{la_name}'")
+                    return False
+            else:
+                key = (top.value, lookahead)
+                if key not in self.table.parserTable:
+                    print(f"[Parser] Error: no hay regla para {self.table.ntsVec[top.value]} con lookahead={self.table.tsVec[lookahead]}")
+                    return False
+
+                stack.pop()
+                rhs = self.table.parserTable[key]  # list[Symbol]
+
+                # Construir RHS en texto
+                if not rhs:
+                    rhs_str = "ε"
+                else:
+                    parts = []
+                    for s in rhs:
+                        parts.append(self.table.ntsVec[s.value] if s.type == NONTERMINAL else self.table.tsVec[s.value])
+                    rhs_str = " ".join(parts)
+
+                print(
+                    pad(pila_str, width_pila)
+                    + pad(entrada_str, width_entrada)
+                    + pad(f"{self.table.ntsVec[top.value]} -> {rhs_str}", width_regla)
+                )
+
+                # Apilar RHS en orden inverso
+                for s in reversed(rhs):
+                    stack.append(s)
+
+        if ip == len(input_ids):
+            print("\n[Parser] Análisis exitoso ")
+            return True
+        else:
+            print("\n[Parser] Error sintactico ")
+            return False
+
+
+"""
 from __future__ import annotations
 from typing import Optional
 
@@ -230,3 +350,4 @@ class Parser:
 
         else:
             raise RuntimeError("Error sintáctico")
+"""
