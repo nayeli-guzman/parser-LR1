@@ -1,0 +1,20 @@
+Scanner
+
+TOKEN(ID, "x")
+TOKEN(ASSIGN, "=")
+TOKEN(NUM, "1")
+TOKEN(SEMICOL, ";")
+TOKEN(SWITCH, "switch")
+TOKEN(ID, "x")
+TOKEN(CASE, "case")
+TOKEN(NUM, "1")
+TOKEN(COLON, ":")
+TOKEN(PRINT, "print")
+TOKEN(LPAREN, "(")
+TOKEN(NUM, "100")
+TOKEN(RPAREN, ")")
+TOKEN(ENDSWITCH, "endswitch")
+TOKEN(END)
+
+Scanner exitoso
+
