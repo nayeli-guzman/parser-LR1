@@ -1,27 +1,26 @@
-# grammar.py
+
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Set, List
 
-# --- Helpers (equivalentes a utils.h: trim, split) ---
 def trim(s: str) -> str:
     return s.strip()
 
 def split(s: str, sep: str) -> List[str]:
     if sep == ' ':
-        # Igual que en tu C++: separar por espacio simple y filtrar vacíos
         return [t for t in s.split(sep) if t != ""]
     return [t.strip() for t in s.split(sep)]
 
 @dataclass
 class Grammar:
+
     terminals: Set[str] = field(default_factory=set)
     nonTerminals: Set[str] = field(default_factory=set)
     initialState: str = ""
     rules: List[str] = field(default_factory=list)
 
     def loadFromFile(self, filename: str) -> bool:
-        """Carga gramática desde archivo de texto (misma semántica que tu C++)."""
+
         rhsSymbols: List[str] = []
 
         try:

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Tuple, Set
 
-# Helpers mínimos (mismo comportamiento que utils.h en tu C++)
 def trim(s: str) -> str:
     return s.strip()
 

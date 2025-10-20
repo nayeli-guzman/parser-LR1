@@ -1,4 +1,3 @@
-# main_ll1.py
 from __future__ import annotations
 from pathlib import Path
 
@@ -6,12 +5,12 @@ from grammar import Grammar
 from first import First
 from follow import Follow
 
-# Nota: evita colisionar con otros "Table" o "Parser" de tu proyecto.
 from table import Table
 from parser import LL1Parser
 
 
 def main() -> int:
+    
     # ====================================================
     # 1. Cargar la gramática desde archivo
     # ====================================================

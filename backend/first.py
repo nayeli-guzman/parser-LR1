@@ -3,31 +3,25 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Set, List, Dict
 
-# --- Helpers (equivalentes a utils.h: trim, split) ---
 def trim(s: str) -> str:
     return s.strip()
 
 def split(s: str, sep: str) -> List[str]:
     if sep == ' ':
-        # Mantener el comportamiento del C++: separar por espacios únicos
-        # (no split por cualquier whitespace).
         return [t for t in s.split(sep) if t != ""]
     return [t.strip() for t in s.split(sep)]
 
 
-# --- Interfaz mínima de Grammar para contexto ---
 @dataclass
 class Grammar:
     nonTerminals: Set[str] = field(default_factory=set)  # e.g., {"E", "T", "F"}
     rules: List[str] = field(default_factory=list)       # e.g., ["E -> T E'", "T -> F T'"]
 
-
 class First:
     """
     Calcula conjuntos FIRST de una GLC.
-    Nota: Fiel a tu C++, solo mira el PRIMER símbolo de cada alternativa y
-    no propaga a través de anulables (ε), excepto por el literal '' tal cual.
     """
+    
     def __init__(self, g: Grammar) -> None:
         self.grammar: Grammar = g
         self.firstSets: Dict[str, Set[str]] = {}
