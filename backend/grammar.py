@@ -58,13 +58,60 @@ class Grammar:
             print(f"Error al abrir archivo: {filename} ({e})")
             return False
 
-        # Determinar terminales: símbolos del RHS que no son no terminales
+        for s in rhsSymbols:
+            if s not in self.nonTerminals:
+                self.terminals.add(s)
+
+        self.terminals.add("$") 
+        return True
+
+    def loadFromString(self, text: str, reset: bool = True) -> bool:
+       
+        if reset:
+            self.rules = []
+            self.nonTerminals = set()
+            self.terminals = set()
+            self.initialState = ""
+
+        rhsSymbols: List[str] = []
+
+        for raw in text.splitlines():
+            line = trim(raw)
+            if not line or line.startswith("#"):
+                continue
+
+            self.rules.append(line)
+
+            pos = line.find("->")
+            if pos == -1:
+                print(f"Regla inválida: {line}")
+                continue
+
+            left = trim(line[:pos])
+            if not self.nonTerminals:
+                self.initialState = left
+            self.nonTerminals.add(left)
+
+            right = trim(line[pos + 2:])
+            alternatives = split(right, '|')
+
+            for alt in alternatives:
+                alt = trim(alt)
+                if not alt or alt in ("''", "ε"):
+                    continue
+                symbols = split(alt, ' ')
+                for sym in symbols:
+                    sym = trim(sym)
+                    if sym and sym not in ("''", "ε"):
+                        rhsSymbols.append(sym)
+
         for s in rhsSymbols:
             if s not in self.nonTerminals:
                 self.terminals.add(s)
 
         self.terminals.add("$")  # EOF
         return True
+
 
     def print(self) -> None:
         print(f"Estado inicial: {self.initialState}")
