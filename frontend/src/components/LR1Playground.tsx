@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { buildOnServer, parseOnServer } from "../lib/parseApi";
+import { buildOnServer, downloadAutomatonPNG, fetchAutomaton, parseOnServer } from "../lib/parseApi";
 
 
 /**
@@ -365,14 +365,63 @@ export default function LR1Playground() {
   const [serverFirsts, setServerFirsts] = useState<Record<string, string[]> | null>(null);
   const [serverStart, setServerStart] = useState<string | null>(null);
 
-  
-  const grammar = useMemo(() => {
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewKind, setPreviewKind] = useState<"svg" | "png" | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+  const [previewDetail, setPreviewDetail] = useState<"simple"|"items">("simple");
+
+  async function openPreview(kind: "svg"|"png", detail: "simple"|"items") {
     try {
-      return parseGrammar(rules, nonterminals, terminals, start);
-    } catch (e: any) {
-      return null;
+      setIsLoadingPreview(true);
+      const blob = await fetchAutomaton(kind, rules, detail);
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      setPreviewKind(kind);
+      setPreviewDetail(detail);
+      setIsPreviewOpen(true);
+    } catch (e:any) {
+      setError(e.message || String(e));
+    } finally {
+      setIsLoadingPreview(false);
     }
-  }, [rules, nonterminals, terminals, start]);
+  }
+
+  // async function openPreview(kind: "svg" | "png") {
+  //   try {
+  //     setIsLoadingPreview(true);
+  //     const blob = await fetchAutomaton(kind, rules); // usa tus reglas del textarea
+  //     const url = URL.createObjectURL(blob);
+  //     setPreviewUrl(url);
+  //     setPreviewKind(kind);
+  //     setIsPreviewOpen(true);
+  //   } catch (e: any) {
+  //     setError(e.message || String(e));
+  //   } finally {
+  //     setIsLoadingPreview(false);
+  //   }
+  // }
+
+  function closePreview() {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+    setPreviewKind(null);
+    setIsPreviewOpen(false);
+  }
+
+  function downloadPreview() {
+    if (!previewUrl || !previewKind) return;
+    const a = document.createElement("a");
+    a.href = previewUrl;
+    a.download = `lr1_automaton.${previewKind}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Nota: no revocamos aquí el URL para que el navegador pueda leerlo;
+    // se revoca al cerrar el modal.
+  }
+    
 
   const buildAll = async () => {
     try {
@@ -429,7 +478,7 @@ export default function LR1Playground() {
               onChange={e => setRules(e.target.value)}
             />
             <div className="bg-white rounded-2xl shadow p-4 mt-3">
-              <h3 className="text-base font-medium mb-2">FIRST (desde backend)</h3>
+              <h3 className="text-base font-medium mb-2">FIRST Table</h3>
 
               {!serverFirsts ? (
                 <p className="text-sm text-gray-500">
@@ -504,7 +553,29 @@ export default function LR1Playground() {
         {/* Right: automaton & tables */}
         <section className="lg:col-span-2 space-y-4">
           <div className="bg-white rounded-2xl shadow p-4">
-            <h2 className="text-lg font-medium mb-3">Estados LR(1)</h2>
+            <h2 className="text-lg font-medium mb-3 flex items-center justify-between">
+  <span>Estados LR(1)</span>
+  <div className="flex items-center gap-2">
+    <button
+      onClick={() => openPreview("png", "simple")}
+      className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50"
+      title="Vista previa PNG (simple)"
+    >
+      PNG simple
+    </button>
+    <button
+      onClick={() => openPreview("png", "items")}
+      className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50"
+      title="Vista previa PNG (con ítems)"
+    >
+      PNG con ítems
+    </button>
+  </div>
+</h2>
+
+
+
+
             {!auto ? (
               <p className="text-sm text-gray-500">Construye el autómata para ver los estados.</p>
             ) : (
@@ -515,8 +586,46 @@ export default function LR1Playground() {
                       <span className="font-medium">I{idx}</span>
                       <span className="text-xs text-gray-500">{Array.from(I).length} ítems</span>
                     </summary>
+
+                    {/* Ítems del estado */}
                     <div className="mt-2 font-mono text-xs whitespace-pre">
                       {Array.from(I).sort().join("\n")}
+                    </div>
+
+                    {/* Transiciones salientes de este estado */}
+                    <div className="mt-3 text-xs">
+                      <div className="font-semibold mb-1">Transiciones</div>
+                      <div className="flex flex-wrap gap-2">
+                        {Array.from(auto.trans.entries())
+                          .filter(([k]) => k.startsWith(`${idx}::`))
+                          .sort((a, b) => {
+                            const AX = a[0].split("::")[1];
+                            const BX = b[0].split("::")[1];
+                            return AX.localeCompare(BX);
+                          })
+                          .map(([k, j]) => {
+                            const X = k.split("::")[1];
+                            // Detectar tipo por presencia en ACTION/GOTO
+                            const isAction = tables?.ACTION?.has?.(`${idx}::${X}`);
+                            const isGoto   = tables?.GOTO?.has?.(`${idx}::${X}`);
+                            const kind = isAction ? "ACTION" : isGoto ? "GOTO" : "—";
+                            const chipClass =
+                              isAction
+                                ? "bg-blue-50 text-blue-700 border-blue-200"
+                                : isGoto
+                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  : "bg-gray-50 text-gray-600 border-gray-200";
+                            return (
+                              <span key={k} className={`px-2 py-1 rounded-full border ${chipClass}`}>
+                                {X} → {j} <span className="opacity-70">({kind})</span>
+                              </span>
+                            );
+                          })}
+                        {/* Si no hay transiciones */}
+                        {Array.from(auto.trans.keys()).every(k => !k.startsWith(`${idx}::`)) && (
+                          <span className="text-gray-500">—</span>
+                        )}
+                      </div>
                     </div>
                   </details>
                 ))}
@@ -524,6 +633,59 @@ export default function LR1Playground() {
             )}
           </div>
 
+          {/* Modal de vista previa del autómata */}
+{isPreviewOpen && (
+  <div
+    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    onClick={closePreview}
+    role="dialog"
+    aria-modal="true"
+  >
+    <div
+      className="bg-white rounded-2xl shadow-xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden"
+      onClick={e => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between border-b px-4 py-2">
+  <div className="text-sm text-gray-600">
+    Vista previa del autómata ({previewKind?.toUpperCase()} • {previewDetail})
+  </div>
+  <div className="flex gap-2">
+    <button
+      onClick={downloadPreview}
+      className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50"
+    >
+      Descargar
+    </button>
+    <button onClick={closePreview} className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50">
+      Cerrar
+    </button>
+  </div>
+</div>
+
+
+      <div className="p-3 bg-gray-50">
+        {previewUrl ? (
+          <div className="w-full h-[70vh] overflow-auto grid place-items-center">
+            {/* <img> soporta SVG y PNG */}
+            <img
+              src={previewUrl}
+              alt="LR(1) automaton preview"
+              className="max-w-full h-auto"
+              style={{ imageRendering: "crisp-edges" }}
+            />
+          </div>
+        ) : (
+          <div className="h-[70vh] grid place-items-center text-sm text-gray-500">
+            Generando…
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+)}
+
+
+          {/*
           <div className="bg-white rounded-2xl shadow p-4">
             <h2 className="text-lg font-medium mb-3">Transiciones</h2>
             {!auto ? (
@@ -549,58 +711,113 @@ export default function LR1Playground() {
               </div>
             )}
           </div>
-
+          */}
+          {/* === LR table (matriz) === */}
           <div className="bg-white rounded-2xl shadow p-4">
-            <h2 className="text-lg font-medium mb-3">Tablas ACTION / GOTO</h2>
-            {!tables ? (
-              <p className="text-sm text-gray-500">Construye las tablas para ver ACTION y GOTO.</p>
+            <h2 className="text-lg font-medium mb-3">LR table</h2>
+
+            {!tables || !auto ? (
+              <p className="text-sm text-gray-500">Construye para ver la tabla LR.</p>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium mb-2">ACTION</h3>
-                  <div className="overflow-x-auto max-h-72 overflow-y-auto">
-                    <table className="min-w-full text-sm">
+              (() => {
+                // --- Derivar columnas ---
+                // Terminals (ACTION)
+                const termSet = new Set<string>();
+                for (const k of tables.ACTION.keys()) {
+                  const [, a] = k.split("::");
+                  termSet.add(a);
+                }
+                // Asegura $ al final si existe
+                const terms = Array.from(termSet).sort((a, b) => {
+                  if (a === "$") return 1;
+                  if (b === "$") return -1;
+                  return a.localeCompare(b);
+                });
+
+                // Nonterminals (GOTO)
+                const ntSet = new Set<string>();
+                for (const k of tables.GOTO.keys()) {
+                  const [, A] = k.split("::");
+                  ntSet.add(A);
+                }
+                // No mostrar S' si aparece
+                const nonterms = Array.from(ntSet).filter(A => !A.endsWith("'")).sort();
+
+                // --- Estados (filas) ---
+                const rowCount = auto.states.length; // ya lo tienes
+
+                // --- Índices de producción para "r#" (opcionales, para que luzca como tu screenshot) ---
+                type ProdKey = string;
+                const prodIndex = new Map<ProdKey, number>();
+                let nextIdx = 1;
+                for (const v of tables.ACTION.values()) {
+                  if (v.kind === "reduce") {
+                    const pk = `${v.prod.left}→${v.prod.right.join(" ")}`;
+                    if (!prodIndex.has(pk)) prodIndex.set(pk, nextIdx++);
+                  }
+                }
+
+                const fmtCell = (i: number, sym: string): string | JSX.Element => {
+                  const act = tables.ACTION.get(`${i}::${sym}`);
+                  if (!act) return "";
+                  if (act.kind === "shift") {
+                    return <span className="text-blue-600 font-semibold">s{act.to}</span>;
+                  }
+                  if (act.kind === "reduce") {
+                    const pk = `${act.prod.left}→${act.prod.right.join(" ")}`;
+                    const idx = prodIndex.get(pk) ?? "";
+                    return <span className="text-green-700 font-semibold">r{idx}</span>;
+                  }
+                  return <span className="text-green-700 font-semibold">acc</span>;
+                };
+
+                const fmtGoto = (i: number, A: string): string => {
+                  const j = tables.GOTO.get(`${i}::${A}`);
+                  return j === undefined ? "" : String(j);
+                };
+
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm border border-gray-400">
                       <thead>
-                        <tr className="text-left border-b">
-                          <th className="py-2 pr-4">(i, a)</th>
-                          <th className="py-2">acción</th>
+                        <tr>
+                          <th className="border border-gray-400 px-2 py-1 align-middle" rowSpan={2}>State</th>
+                          <th className="border border-gray-400 px-2 py-1 text-center" colSpan={terms.length}>ACTION</th>
+                          <th className="border border-gray-400 px-2 py-1 text-center" colSpan={nonterms.length}>GOTO</th>
+                        </tr>
+                        <tr>
+                          {terms.map(t => (
+                            <th key={`a-${t}`} className="border border-gray-400 px-2 py-1 font-semibold">{t}</th>
+                          ))}
+                          {nonterms.map(A => (
+                            <th key={`g-${A}`} className="border border-gray-400 px-2 py-1 font-semibold">{A}</th>
+                          ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {Array.from(tables.ACTION.entries()).map(([k, v]) => (
-                          <tr key={k} className="border-b last:border-0">
-                            <td className="py-1 pr-4 font-mono">{k}</td>
-                            <td className="py-1">{fmtAction(v)}</td>
+                        {Array.from({ length: rowCount }).map((_, i) => (
+                          <tr key={i}>
+                            <td className="border border-gray-400 px-2 py-1 font-semibold">{i}</td>
+                            {terms.map(t => (
+                              <td key={`c-${i}-${t}`} className="border border-gray-400 px-2 py-1 text-center">
+                                {fmtCell(i, t)}
+                              </td>
+                            ))}
+                            {nonterms.map(A => (
+                              <td key={`g-${i}-${A}`} className="border border-gray-400 px-2 py-1 text-center">
+                                {fmtGoto(i, A)}
+                              </td>
+                            ))}
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                </div>
-                <div>
-                  <h3 className="font-medium mb-2">GOTO</h3>
-                  <div className="overflow-x-auto max-h-72 overflow-y-auto">
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="text-left border-b">
-                          <th className="py-2 pr-4">(i, A)</th>
-                          <th className="py-2">j</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from(tables.GOTO.entries()).map(([k, v]) => (
-                          <tr key={k} className="border-b last:border-0">
-                            <td className="py-1 pr-4 font-mono">{k}</td>
-                            <td className="py-1">{v}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
+                );
+              })()
             )}
           </div>
+
 
           <div className="bg-white rounded-2xl shadow p-4">
             <h2 className="text-lg font-medium mb-3">Trazas del análisis</h2>

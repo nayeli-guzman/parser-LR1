@@ -34,3 +34,36 @@ export async function parseOnServer(input: string, rules: string): Promise<Parse
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+export async function downloadAutomatonPNG(grammar: string) {
+  const res = await fetch(`${API}/automaton/png`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rules: grammar }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "lr1_automaton.png";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+
+export async function fetchAutomaton(
+  kind: "svg" | "png",
+  grammar: string,
+  detail: "simple" | "items" = "simple"
+): Promise<Blob> {
+  const res = await fetch(`${API}/automaton/${kind}?detail=${detail}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rules: grammar }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return await res.blob();
+}

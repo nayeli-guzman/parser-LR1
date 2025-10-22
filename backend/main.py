@@ -5,6 +5,8 @@ from typing import Dict, List, Tuple, Optional, Set
 from lr1 import LR1Builder
 from grammar import Grammar
 from first_ import First
+from fastapi import Response, Query
+from graphviz import Source
 
 EPS = "''"   
 END = "$"
@@ -203,3 +205,54 @@ def parse(req: ParseRequest):
     out = [StepDTO(stack=s["stack"], input=s["input"], action=s["action"]) for s in steps]
     
     return ParseResponse(steps=out)
+
+def automaton_dot(states, trans) -> str:
+    lines = ["digraph LR1 {", "rankdir=LR;", 'node [shape=circle,fontname="Inter"];']
+    for i in range(len(states)):
+        lines.append(f'{i} [label="{i}"];')
+    for (i, X), j in trans.items():
+        label = str(X).replace('"', r'\"')
+        lines.append(f'{i} -> {j} [label="{label}"];')
+    lines.append("}")
+    return "\n".join(lines)
+
+def _fmt_item(it) -> str:
+    right = list(it.right)
+    right.insert(it.dot, "·")
+    body = " ".join(right) if right else "·"
+    return f"{it.left} → {body} , {it.look}\\l"
+
+def automaton_dot(states, trans, *, show_items: bool) -> str:
+    lines = [
+        "digraph LR1 {",
+        "rankdir=LR;",
+        'graph [fontname="Inter"];',
+        'node  [fontname="Courier", shape=box, style=rounded];',
+        'edge  [fontname="Inter"];',
+    ]
+
+    for i, I in enumerate(states):
+        if show_items:
+            items = sorted(I, key=lambda x: (x.left, x.dot, x.look, tuple(x.right)))
+            label = f"I{i}\\l" + "".join(_fmt_item(it) for it in items)
+            lines.append(f'{i} [label="{label}"];')
+        else:
+            lines.append(f'{i} [label="{i}", shape=circle, fontname="Inter"];')
+
+    for (i, X), j in trans.items():
+        lbl = str(X).replace('"', r'\"')
+        lines.append(f'{i} -> {j} [label="{lbl}"];')
+
+    lines.append("}")
+    return "\n".join(lines)
+
+@app.post("/automaton/png")
+def automaton_png(
+    req: BuildRequest,
+    detail: str = Query("simple", pattern="^(simple|items)$")
+):
+    G, _, _, _ = parse_grammar(req.rules)
+    states, trans = G.build_automaton()
+    dot_src = automaton_dot(states, trans, show_items=(detail == "items"))
+    png_bytes = Source(dot_src).pipe(format="png")
+    return Response(content=png_bytes, media_type="image/png")
