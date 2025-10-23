@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { buildOnServer, downloadAutomatonPNG, fetchAutomaton, parseOnServer } from "../lib/parseApi";
+import VisualHeaderMinimal from "./VisualHeader";
 
 
 /**
@@ -351,8 +352,7 @@ const DEFAULT_INPUT = "id + id * id";
 
 export default function LR1Playground() {
   const [rules, setRules] = useState(DEFAULT_RULES);
-  const [nonterminals, setNonterminals] = useState(DEFAULT_N);
-  const [terminals, setTerminals] = useState(DEFAULT_T);
+  
   const [start, setStart] = useState(DEFAULT_S);
   const [input, setInput] = useState(DEFAULT_INPUT);
 
@@ -371,6 +371,30 @@ export default function LR1Playground() {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   const [previewDetail, setPreviewDetail] = useState<"simple"|"items">("simple");
+  const prodRows = useMemo(() => buildProdIndexFromTables(tables), [tables]);
+
+
+  type ProdKey = string;
+  type ProdRow = { id: number; left: string; right: string[] };
+
+  function buildProdIndexFromTables(tables: ReturnType<typeof buildTables> | null): ProdRow[] {
+    if (!tables) return [];
+    // recolecta todas las reducciones presentes en ACTION
+    const set = new Map<ProdKey, { left: string; right: string[] }>();
+    for (const v of tables.ACTION.values()) {
+      if (v.kind === "reduce") {
+        const key = `${v.prod.left}→${v.prod.right.join(" ")}`;
+        if (!set.has(key)) set.set(key, { left: v.prod.left, right: v.prod.right });
+      }
+    }
+    // asigna índices r1, r2, ... en orden estable
+    const rows: ProdRow[] = [];
+    let idx = 1;
+    for (const { left, right } of set.values()) {
+      rows.push({ id: idx++, left, right });
+    }
+    return rows;
+  }
 
   async function openPreview(kind: "svg"|"png", detail: "simple"|"items") {
     try {
@@ -388,20 +412,7 @@ export default function LR1Playground() {
     }
   }
 
-  // async function openPreview(kind: "svg" | "png") {
-  //   try {
-  //     setIsLoadingPreview(true);
-  //     const blob = await fetchAutomaton(kind, rules); // usa tus reglas del textarea
-  //     const url = URL.createObjectURL(blob);
-  //     setPreviewUrl(url);
-  //     setPreviewKind(kind);
-  //     setIsPreviewOpen(true);
-  //   } catch (e: any) {
-  //     setError(e.message || String(e));
-  //   } finally {
-  //     setIsLoadingPreview(false);
-  //   }
-  // }
+
 
   function closePreview() {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -452,19 +463,18 @@ export default function LR1Playground() {
       setSteps(steps);
       setError(null);
     } catch (e: any) {
-      setError(e.message || String(e));
+      setError("Cadena incorrecta");
     }
   };
 
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">LR(1) Parser Playground</h1>
-          <div className="text-sm text-gray-500">ε = "{EPS}" • end = "{END}"</div>
-        </div>
-      </header>
+      <VisualHeaderMinimal
+        EPS={EPS}
+        END={END}
+        repoUrl="https://github.com/nayeli-guzman/parser-LR1"
+      />
 
       <main className="max-w-6xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left: grammar inputs */}
@@ -535,7 +545,16 @@ export default function LR1Playground() {
               </div>
 
               <div className="flex items-end justify-end">
-                <button onClick={buildAll} className="rounded-xl px-3 py-2 bg-black text-white text-sm shadow hover:opacity-90 w-full">Construir LR(1)</button>
+<button
+  onClick={buildAll}
+  className="w-full rounded-xl px-4 py-2.5 text-sm font-medium
+             bg-neutral-900 text-white shadow-sm
+             transform-gpu transition-transform duration-150 ease-out
+             hover:scale-105 active:scale-95 hover:shadow-md
+             focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-neutral-900"
+>
+  Construir LR(1)
+</button>
               </div>
             </div>
             {error && (
@@ -548,6 +567,38 @@ export default function LR1Playground() {
             <input className="w-full rounded-xl border p-2 text-sm" value={input} onChange={e => setInput(e.target.value)} />
             <button onClick={runParse} className="mt-3 rounded-xl px-3 py-2 bg-indigo-600 text-white text-sm shadow hover:opacity-90 w-full">Ejecutar parse</button>
           </div>
+
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+  <div className="flex items-center justify-between mb-2">
+    <h2 className="text-lg font-medium">Producciones (ids)</h2>
+  </div>
+
+  {!prodRows.length ? (
+    <p className="text-sm text-gray-500">Construye LR(1) para ver las producciones.</p>
+  ) : (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="text-left border-b">
+            <th className="py-2 pr-4">ID</th>
+            <th className="py-2">Producción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {prodRows.map((p) => (
+            <tr key={p.id} className="border-b last:border-0 hover:bg-gray-50/50">
+              <td className="py-1 pr-4 font-semibold">r{p.id}</td>
+              <td className="py-1 font-mono">
+                {p.left} → {p.right.length ? p.right.join(" ") : "ε"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</div>
+
         </section>
 
         {/* Right: automaton & tables */}
@@ -641,84 +692,55 @@ export default function LR1Playground() {
           </div>
 
           {/* Modal de vista previa del autómata */}
-{isPreviewOpen && (
-  <div
-    className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-    onClick={closePreview}
-    role="dialog"
-    aria-modal="true"
-  >
-    <div
-      className="bg-white rounded-2xl shadow-xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden"
-      onClick={e => e.stopPropagation()}
-    >
-      <div className="flex items-center justify-between border-b px-4 py-2">
-  <div className="text-sm text-gray-600">
-    Vista previa del autómata ({previewKind?.toUpperCase()} • {previewDetail})
-  </div>
-  <div className="flex gap-2">
-    <button
-      onClick={downloadPreview}
-      className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50"
-    >
-      Descargar
-    </button>
-    <button onClick={closePreview} className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50">
-      Cerrar
-    </button>
-  </div>
-</div>
-
-
-      <div className="p-3 bg-gray-50">
-        {previewUrl ? (
-          <div className="w-full h-[70vh] overflow-auto grid place-items-center">
-            {/* <img> soporta SVG y PNG */}
-            <img
-              src={previewUrl}
-              alt="LR(1) automaton preview"
-              className="max-w-full h-auto"
-              style={{ imageRendering: "crisp-edges" }}
-            />
+          {isPreviewOpen && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+              onClick={closePreview}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div
+                className="bg-white rounded-2xl shadow-xl w-[95vw] max-w-5xl max-h-[85vh] overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b px-4 py-2">
+            <div className="text-sm text-gray-600">
+              Vista previa del autómata ({previewKind?.toUpperCase()} • {previewDetail})
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={downloadPreview}
+                className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50"
+              >
+                Descargar
+              </button>
+              <button onClick={closePreview} className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50">
+                Cerrar
+              </button>
+            </div>
           </div>
-        ) : (
-          <div className="h-[70vh] grid place-items-center text-sm text-gray-500">
-            Generando…
-          </div>
-        )}
-      </div>
-    </div>
-  </div>
-)}
 
 
-          {/*
-          <div className="bg-white rounded-2xl shadow p-4">
-            <h2 className="text-lg font-medium mb-3">Transiciones</h2>
-            {!auto ? (
-              <p className="text-sm text-gray-500">Construye el autómata para ver las transiciones.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-left border-b">
-                      <th className="py-2 pr-4">(i, X)</th>
-                      <th className="py-2">j</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Array.from(auto.trans.entries()).map(([k, j]) => (
-                      <tr key={k} className="border-b last:border-0">
-                        <td className="py-1 pr-4 font-mono">{k}</td>
-                        <td className="py-1">{j}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div className="p-3 bg-gray-50">
+                  {previewUrl ? (
+                    <div className="w-full h-[70vh] overflow-auto grid place-items-center">
+                      {/* <img> soporta SVG y PNG */}
+                      <img
+                        src={previewUrl}
+                        alt="LR(1) automaton preview"
+                        className="max-w-full h-auto"
+                        style={{ imageRendering: "crisp-edges" }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-[70vh] grid place-items-center text-sm text-gray-500">
+                      Generando…
+                    </div>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-          */}
+            </div>
+          )}
           {/* === LR table (matriz) === */}
           <div className="bg-white rounded-2xl shadow p-4">
             <h2 className="text-lg font-medium mb-3">LR table</h2>
