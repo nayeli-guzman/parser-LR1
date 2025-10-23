@@ -57,9 +57,14 @@ export async function downloadAutomatonPNG(grammar: string) {
 export async function fetchAutomaton(
   kind: "svg" | "png",
   grammar: string,
-  detail: "simple" | "items" = "simple"
+  detail: "simple" | "items" | "nfa" = "simple"
 ): Promise<Blob> {
-  const res = await fetch(`${API}/automaton/${kind}?detail=${detail}`, {
+  const endpoint =
+    detail === "nfa"
+      ? `/automaton/nfa/${kind}`   // 🔹 nuevo endpoint
+      : `/automaton/${kind}?detail=${detail}`;
+  
+  const res = await fetch(`${API}${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rules: grammar }),

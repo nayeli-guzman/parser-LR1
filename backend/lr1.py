@@ -253,6 +253,53 @@ class LR1Builder:
             raise ValueError(f"Conflicto LR(1) en ACTION[{i},{a}]: {prev} vs {entry}")
         ACTION[(i, a)] = entry
 
+    def build_nfa_items(self):
+        """
+        Construye el AFN de ítems LR(1):
+        - Cada ítem es un estado.
+        - Transiciones etiquetadas con símbolo o ε (cuando hay no terminales).
+        Retorna:
+            (Q, E, start)
+            Q: conjunto de ítems (estados)
+            E: lista de transiciones (src, label, dst)
+            start: ítem inicial
+        """
+        Q: Set[LR1Item] = set()
+        E: List[Tuple[LR1Item, str, LR1Item]] = []
+
+        start = LR1Item(self.S_, tuple([self.S]), 0, END)
+        Q.add(start)
+        work = [start]
+
+        while work:
+            it = work.pop()
+            B = it.next_symbol()
+            if not B:
+                continue
+
+            # Transición etiquetada con símbolo
+            nxt = it.advance()
+            E.append((it, B, nxt))
+            if nxt not in Q:
+                Q.add(nxt)
+                work.append(nxt)
+
+            # Transiciones ε cuando B es no terminal
+            if B in self.N:
+                beta = list(it.right[it.dot + 1:])
+                lookseq = beta + [it.look]
+                la = self.first_seq(lookseq)
+                for prod in self.prods[B]:
+                    for b in la:
+                        look2 = it.look if b == EPS else b
+                        new_it = LR1Item(B, tuple(prod.right), 0, look2)
+                        E.append((it, "ε", new_it))
+                        if new_it not in Q:
+                            Q.add(new_it)
+                            work.append(new_it)
+        return Q, E, start
+
+
 class LR1Parser:
     def __init__(self, builder: LR1Builder):
         self.builder = builder

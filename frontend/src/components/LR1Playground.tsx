@@ -561,14 +561,21 @@ export default function LR1Playground() {
       className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50"
       title="Vista previa PNG (simple)"
     >
-      PNG simple
+      AFD simple
     </button>
     <button
       onClick={() => openPreview("png", "items")}
       className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50"
       title="Vista previa PNG (con ítems)"
     >
-      PNG con ítems
+      AFD
+    </button>
+    <button
+      onClick={() => openPreview("png", "nfa")}
+      className="px-3 py-1 rounded-lg border text-sm hover:bg-gray-50 text-indigo-600"
+      title="Vista previa AFN de ítems LR(1)"
+    >
+      AFN
     </button>
   </div>
 </h2>
