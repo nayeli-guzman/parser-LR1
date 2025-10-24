@@ -45,7 +45,7 @@ class DFA:
     start: int                                  # id del estado inicial (normalmente 0)
     accept: Set[int]                            # ids de estados de aceptación
     labels: Set[str]                            # conjunto de etiquetas usadas (sin eps)
-    index: Dict[frozenset, int]                 # mapeo interno frozenset(conjunto) -> id
+    index: Dict[frozenset, int]                 # 
 
 """
     LR1Item representa un ítem LR(1): A -> α . β , a
