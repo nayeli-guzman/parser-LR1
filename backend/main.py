@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Tuple, Optional, Set
-from lr1 import LR1Builder, LR1Item
+from lr1 import LR1Builder, LR1Item, NFA, DFA
 from grammar import Grammar
 from first_ import First
 from fastapi import Response, Query
@@ -79,12 +79,15 @@ def parse_grammar(grammar_str: str):
         def __init__(self, builder: LR1Builder):
             self._b = builder
 
-        def build_automaton(self):
-            return self._b.build_automaton()  # -> (states, trans)
-
-        def build_tables(self):
-            ACTION, GOTO, _states = self._b.build_tables()
+        def get_tables(self):
+            ACTION, GOTO, _states = self._b.tables()
             return ACTION, GOTO
+        
+        def get_afn(self):
+            return self._b.afn
+        
+        def get_afd(self):
+            return self._b.afd
 
         def parse_input(self, input_str: str, ACTION, GOTO):
 
@@ -149,80 +152,13 @@ def parse_grammar(grammar_str: str):
 
     return _Adapter(builder), grammar.nonTerminals, firsts.firstSets, grammar.initialState
 
-# ---- Endpoints ----
-
-@app.post("/build", response_model=BuildResponse)
-def build(req: BuildRequest):
-
-    G, nonTerminals, firstSets, initialSymbol = parse_grammar(req.rules)
-    states, trans = G.build_automaton()
-    ACTION, GOTO = G.build_tables()
-
-    def item_str(it) -> str:
-        right = list(it.right)
-        right.insert(it.dot, "·")
-        body = " ".join(right) if right else "·"
-        return f"{it.left} → {body} , {it.look}"
-
-    states_ser = [[item_str(it) for it in sorted(I, key=lambda x: (x.left, x.dot, x.look, tuple(x.right)))]
-                  for I in states]
-
-    trans_ser = {f"{i}::{X}": j for (i, X), j in trans.items()}
-
-    action_ser: Dict[str, dict] = {}
-    for (i, a), entry in ACTION.items():
-        if entry[0] == "shift":
-            action_ser[f"{i}::{a}"] = {"kind": "shift", "to": entry[1]}
-        elif entry[0] == "reduce":
-            prod = entry[1]
-            action_ser[f"{i}::{a}"] = {"kind": "reduce", "prod": {"left": prod.left, "right": prod.right}}
-        else:
-            action_ser[f"{i}::{a}"] = {"kind": "accept"}
-
-    goto_ser = {f"{i}::{A}": j for (i, A), j in GOTO.items()}
-
-    nonTerminals = _to_list_str(nonTerminals) 
-    firsts={k: sorted(list(v)) for k, v in firstSets.items()}
-
-    return BuildResponse(states=states_ser, 
-                         transitions=trans_ser, 
-                         action=action_ser, 
-                         goto=goto_ser,
-                         nonTerminals=nonTerminals,
-                         firsts=firsts,
-                         initialSymbol=initialSymbol
-                        )
-
-@app.post("/parse", response_model=ParseResponse)
-def parse(req: ParseRequest):
-    
-    G, _ , _, _ = parse_grammar(req.rules)
-    states, trans = G.build_automaton()
-    ACTION, GOTO = G.build_tables()
-
-    steps = G.parse_input(req.input, ACTION, GOTO) 
-
-    out = [StepDTO(stack=s["stack"], input=s["input"], action=s["action"]) for s in steps]
-    
-    return ParseResponse(steps=out)
-
-def automaton_dot(states, trans) -> str:
-    lines = ["digraph LR1 {", "rankdir=LR;", 'node [shape=circle,fontname="Inter"];']
-    for i in range(len(states)):
-        lines.append(f'{i} [label="{i}"];')
-    for (i, X), j in trans.items():
-        label = str(X).replace('"', r'\"')
-        lines.append(f'{i} -> {j} [label="{label}"];')
-    lines.append("}")
-    return "\n".join(lines)
-
 def _fmt_item(it) -> str:
     right = list(it.right)
     right.insert(it.dot, "·")
     body = " ".join(right) if right else "·"
     return f"{it.left} → {body} , {it.look}\\l"
 
-def automaton_dot(states, trans, *, show_items: bool) -> str:
+def automaton_dfa_dot(states, trans, *, show_items: bool) -> str:
     lines = [
         "digraph LR1 {",
         "rankdir=LR;",
@@ -245,17 +181,6 @@ def automaton_dot(states, trans, *, show_items: bool) -> str:
 
     lines.append("}")
     return "\n".join(lines)
-
-@app.post("/automaton/png")
-def automaton_png(
-    req: BuildRequest,
-    detail: str = Query("simple", pattern="^(simple|items)$")
-):
-    G, _, _, _ = parse_grammar(req.rules)
-    states, trans = G.build_automaton()
-    dot_src = automaton_dot(states, trans, show_items=(detail == "items"))
-    png_bytes = Source(dot_src).pipe(format="png")
-    return Response(content=png_bytes, media_type="image/png")
 
 def automaton_nfa_dot(Q, E) -> str:
     def fmt_item(it: LR1Item) -> str:
@@ -296,12 +221,78 @@ def automaton_nfa_dot(Q, E) -> str:
     lines.append("}")
     return "\n".join(lines)
 
+@app.post("/build", response_model=BuildResponse)
+def build(req: BuildRequest):
 
+    G, nonTerminals, firstSets, initialSymbol = parse_grammar(req.rules)
+    afd = G.get_afd()
+    states, trans = afd.states, afd.trans
+    ACTION, GOTO = G.get_tables()
+
+    def item_str(it) -> str:
+        right = list(it.right)
+        right.insert(it.dot, "·")
+        body = " ".join(right) if right else "·"
+        return f"{it.left} → {body} , {it.look}"
+
+    states_ser = [[item_str(it) for it in sorted(I, key=lambda x: (x.left, x.dot, x.look, tuple(x.right)))]
+                  for I in states]
+
+    trans_ser = {f"{i}::{X}": j for (i, X), j in trans.items()}
+
+    action_ser: Dict[str, dict] = {}
+    for (i, a), entry in ACTION.items():
+        if entry[0] == "shift":
+            action_ser[f"{i}::{a}"] = {"kind": "shift", "to": entry[1]}
+        elif entry[0] == "reduce":
+            prod = entry[1]
+            action_ser[f"{i}::{a}"] = {"kind": "reduce", "prod": {"left": prod.left, "right": prod.right}}
+        else:
+            action_ser[f"{i}::{a}"] = {"kind": "accept"}
+
+    goto_ser = {f"{i}::{A}": j for (i, A), j in GOTO.items()}
+
+    nonTerminals = _to_list_str(nonTerminals) 
+    firsts={k: sorted(list(v)) for k, v in firstSets.items()}
+
+    return BuildResponse(states=states_ser, 
+                         transitions=trans_ser, 
+                         action=action_ser, 
+                         goto=goto_ser,
+                         nonTerminals=nonTerminals,
+                         firsts=firsts,
+                         initialSymbol=initialSymbol
+                        )
+
+@app.post("/parse", response_model=ParseResponse)
+def parse(req: ParseRequest):
+    
+    G, _ , _, _ = parse_grammar(req.rules)
+    ACTION, GOTO = G.get_tables()
+
+    steps = G.parse_input(req.input, ACTION, GOTO) 
+
+    out = [StepDTO(stack=s["stack"], input=s["input"], action=s["action"]) for s in steps]
+    
+    return ParseResponse(steps=out)
+
+@app.post("/automaton/dfa/png")
+def automaton_dfa_png(
+    req: BuildRequest,
+    detail: str = Query("simple", pattern="^(simple|items)$")
+):
+    G, _, _, _ = parse_grammar(req.rules)
+    afd = G.get_afd()
+    dot_src = automaton_dfa_dot(afd.states, afd.trans, show_items=(detail == "items"))
+    png_bytes = Source(dot_src).pipe(format="png")
+    return Response(content=png_bytes, media_type="image/png")
 
 @app.post("/automaton/nfa/png")
-def automaton_nfa_png(req: BuildRequest):
+def automaton_nfa_png(
+    req: BuildRequest
+):
     G, _, _, _ = parse_grammar(req.rules)
-    Q, E, _ = G._b.build_nfa_items()  # accedemos al builder real
-    dot_src = automaton_nfa_dot(Q, E)
+    nfa = G.get_afn()
+    dot_src = automaton_nfa_dot(nfa.Q, nfa.E)
     png_bytes = Source(dot_src).pipe(format="png")
     return Response(content=png_bytes, media_type="image/png")

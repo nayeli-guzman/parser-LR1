@@ -31,6 +31,21 @@ class Production:
     def __str__(self):
         return f"{self.left } -> {self.right}"
 
+@dataclass
+class NFA:
+    Q: Set[LR1Item]
+    E: List[Tuple[LR1Item, str, LR1Item]]
+    start: LR1Item
+    eps_label: str = EPS
+
+@dataclass
+class DFA:
+    states: List[Set[LR1Item]]                  # cada estado es un conjunto de LR1Item
+    trans: Dict[Tuple[int, str], int]           # (state_id, label) -> state_id
+    start: int                                  # id del estado inicial (normalmente 0)
+    accept: Set[int]                            # ids de estados de aceptación
+    labels: Set[str]                            # conjunto de etiquetas usadas (sin eps)
+    index: Dict[frozenset, int]                 # mapeo interno frozenset(conjunto) -> id
 
 """
     LR1Item representa un ítem LR(1): A -> α . β , a
@@ -91,6 +106,10 @@ class LR1Builder:
         # FIRST para no terminales
         self.first_nt: Dict[str, Set[str]] = firsts
 
+        self.afn: NFA = self.build_nfa()
+        self.afd: DFA = self.build_dfa()
+        self.tables = self.build_tables()
+
         print(f"No Terminales: {self.N}")
         print(f"Terminales: {self.T}")
         print(f"Start: {self.S}")
@@ -126,8 +145,7 @@ class LR1Builder:
             # Asegurar que el lado izquierdo esté en N
             if A not in self.N:
                 self.N.add(A)
-        
-
+    
         # Tras leer todas las reglas, define T como "símbolos en RHS que no estén en N"
         rhs_syms: Set[str] = set()
         for plist in self.prods.values():
@@ -152,153 +170,201 @@ class LR1Builder:
             out.add(EPS)
         return out
 
-    """
-        Construye el cierre de un conjunto de ítems LR(1).
-    """
-    def closure(self, I: Set[LR1Item]) -> Set[LR1Item]:
-        C = set(I)
-        changed = True
-        while changed:
-            changed = False
-            for item in list(C):
-                B = item.next_symbol() # S'-> . S , $, retorna S
-                if B and B in self.N: # verifica si B es un no terminal
-                    beta = list(item.right[item.dot+1:]) # los símbolos después de B
-                    look_seq = beta + [item.look] # βa para hallar FIRST(βa)
-                    la_set = self.first_seq(look_seq)
-                    for prod in self.prods.get(B, []): # por cada producción B -> γ
-                        for b in la_set: # cada símbolo en FIRST(βa)
-                            # Si FIRST(β a) contiene es vacio, el lookahead es el mismo, sino es el terminal
-                            b2 = item.look if b == EPS else b
-                            new_item = LR1Item(B, tuple(prod.right), 0, b2) # B -> . γ , b
-                            if new_item not in C:
-                                C.add(new_item); changed = True # se añade la nueva producción a la clausura
-        # el proceso continúa hasta que no se añadan más ítems
-        # esto es cuando se hacen las transiciones de EPS
-        return C
-
-    """
-        Mueve el punto en los ítems de I que tienen X después del punto, y
-        retorna la clausura del conjunto resultante.
-    """
-    def goto(self, I: Set[LR1Item], X: str) -> Set[LR1Item]:
-        moved = {it.advance() for it in I if it.next_symbol() == X}
-        if not moved:
-            return set()
-        return self.closure(moved)
-
-    """
-     Construye el autómata LR(1) completo.
-    """
-    def build_automaton(self):
-        # se empezará con el ítem aumentado S' -> . S , $
-        I0 = self.closure({LR1Item(self.S_, tuple([self.S]), 0, END)}) # estado inicial 
-        # {S'-> . S , $; S -> . A B , $; A -> . a A , $; A -> . ε}
-        states: List[Set[LR1Item]] = [I0]
-        trans: Dict[Tuple[int, str], int] = {}
-        work = [I0]
-        while work:
-            I = work.pop()
-            i = states.index(I)
-            symbols = set()
-            for it in I:
-                s = it.next_symbol() # S'-> . S , $ retorna S
-                if s:
-                    symbols.add(s) # se añaden todos los símbolos después del punto != None
-            for X in symbols:
-                J = self.goto(I, X) # avanzar el punto a las producciones que tienen X después del punto, con el mismo lookahead y retorna su clausura
-                if not J:
-                    continue
-                if J not in states:
-                    states.append(J)
-                    work.append(J)
-                j = states.index(J)
-                trans[(i, X)] = j # transición del estado i al j con símbolo X
-        return states, trans
-
-    """
-        Construye las tablas ACTION y GOTO.
-    """
-    def build_tables(self):
-        
-        states, trans = self.build_automaton() # construye el autómata LR(1)
-        ACTION: Dict[Tuple[int, str], Tuple[str, int | Production | None]] = {}
-        GOTO: Dict[Tuple[int, str], int] = {}
-
-        for i, I in enumerate(states): # por cada estado y su id
-            for it in I:
-                a = it.next_symbol()
-                if a in self.T:  # si el símbolo es terminal, se reemplaza (shift del punto)
-                    j = trans.get((i, a)) # estado destino
-                    if j is not None:
-                        self._set_action(ACTION, i, a, ("shift", j))
-                elif a is None:
-                    if it.left == self.S_ and it.look == END:
-                        self._set_action(ACTION, i, END, ("accept", None))
-                    else:
-                        prod = Production(it.left, list(it.right))
-                        self._set_action(ACTION, i, it.look, ("reduce", prod))
-
-            # GOTO para no terminales
-            for A in self.N:
-                j = trans.get((i, A))
-                if j is not None:
-                    GOTO[(i, A)] = j # solo se coloca el ID del estado destino
-
-        return ACTION, GOTO, states
-
     def _set_action(self, ACTION, i, a, entry):
         if (i, a) in ACTION and ACTION[(i, a)] != entry:
             prev = ACTION[(i, a)]
             raise ValueError(f"Conflicto LR(1) en ACTION[{i},{a}]: {prev} vs {entry}")
         ACTION[(i, a)] = entry
 
-    def build_nfa_items(self):
+    def build_nfa(self) -> NFA:
         """
-        Construye el AFN de ítems LR(1):
-        - Cada ítem es un estado.
-        - Transiciones etiquetadas con símbolo o ε (cuando hay no terminales).
-        Retorna:
-            (Q, E, start)
-            Q: conjunto de ítems (estados)
-            E: lista de transiciones (src, label, dst)
-            start: ítem inicial
-        """
-        Q: Set[LR1Item] = set()
-        E: List[Tuple[LR1Item, str, LR1Item]] = []
+        Construye el AFN de ítems LR(1).
 
+        - Cada ítem LR1Item es un estado.
+        - Añade transiciones etiquetadas con el símbolo siguiente al punto.
+        - Añade transiciones epsilon (eps_label) desde un ítem cuando el símbolo
+          siguiente es un no terminal B: por cada producción B -> γ y cada b in FIRST(β a)
+          crea el ítem B -> . γ , look donde look = (b if b != EPS else original_look).
+
+        Parámetros:
+            eps_label: etiqueta para transiciones epsilon (por defecto "ε").
+            store: si True guarda la NFA en self.afn antes de devolverla.
+
+        Retorna:
+            NFA(Q, E, start, eps_label)
+        """
+        Q: Set[LR1Item] = set()                     # estados
+        E: List[Tuple[LR1Item, str, LR1Item]] = []  # transiciones
+
+        # ítem inicial S' -> . S , $
         start = LR1Item(self.S_, tuple([self.S]), 0, END)
         Q.add(start)
         work = [start]
 
         while work:
             it = work.pop()
-            B = it.next_symbol()
-            if not B:
+            B = it.next_symbol()  # símbolo después del punto
+            if B is None:
                 continue
 
-            # Transición etiquetada con símbolo
+            # 1) transición etiquetada con B hacia it.advance()
             nxt = it.advance()
             E.append((it, B, nxt))
             if nxt not in Q:
                 Q.add(nxt)
                 work.append(nxt)
 
-            # Transiciones ε cuando B es no terminal
+            # 2) si B es no terminal, añadir transiciones epsilon a ítems B -> . γ , look
             if B in self.N:
-                beta = list(it.right[it.dot + 1:])
+                # β = símbolos después de B en la producción actual
+                beta = list(it.right[it.dot + 1 :])
+                # FIRST(β a) para determinar lookaheads de las nuevas producciones
                 lookseq = beta + [it.look]
-                la = self.first_seq(lookseq)
-                for prod in self.prods[B]:
-                    for b in la:
+                la_set = self.first_seq(lookseq)
+                for prod in self.prods.get(B, []):  # cada producción B -> γ
+                    for b in la_set:
                         look2 = it.look if b == EPS else b
                         new_it = LR1Item(B, tuple(prod.right), 0, look2)
-                        E.append((it, "ε", new_it))
+                        E.append((it, EPS, new_it))
                         if new_it not in Q:
                             Q.add(new_it)
                             work.append(new_it)
-        return Q, E, start
 
+        nfa = NFA(Q=Q, E=E, start=start, eps_label=EPS)
+        return nfa
+
+    def build_dfa(self) -> DFA:
+        """
+        Construye el AFD a partir de self.afn (si no existe, lo construye).
+        Parámetros:
+            only_terminals: si True filtra las etiquetas del AFN a solo terminales (self.T).
+            eps_label: etiqueta usada en el AFN para transiciones epsilon (por defecto "ε").
+            store: si True guarda el resultado en self.dfa.
+        Retorna:
+            instancia DFA con estados (conjuntos de LR1Item), transiciones y estados de aceptación.
+        """
+        # Asegurar que el AFN existe
+        if not hasattr(self, "afn") or self.afn is None:
+            self.build_nfa()
+
+        Q, E, start = self.afn.Q, self.afn.E, self.afn.start
+
+        E_use = list(E)
+
+        # Construir mapas rápidos: eps_map y trans_map[label][src] -> set(dsts)
+        eps_map: Dict[LR1Item, Set[LR1Item]] = {}
+        trans_map: Dict[str, Dict[LR1Item, Set[LR1Item]]] = {}
+        labels: Set[str] = set()
+
+        for src, lab, dst in E_use:
+            if lab == EPS:
+                eps_map.setdefault(src, set()).add(dst)
+            else:
+                trans_map.setdefault(lab, {}).setdefault(src, set()).add(dst)
+                labels.add(lab)
+
+        def epsilon_closure(states: Set[LR1Item]) -> Set[LR1Item]:
+            stack = list(states)
+            res = set(states)
+            while stack:
+                u = stack.pop()
+                for v in eps_map.get(u, ()):
+                    if v not in res:
+                        res.add(v)
+                        stack.append(v)
+            return res
+
+        def move(states: Set[LR1Item], sym: str) -> Set[LR1Item]:
+            out: Set[LR1Item] = set()
+            m = trans_map.get(sym)
+            if not m:
+                return out
+            for s in states:
+                out |= m.get(s, set())
+            return out
+
+        # Inicial: cierre epsilon del ítem inicial
+        start_closure = epsilon_closure({start})
+        d_states: List[Set[LR1Item]] = [start_closure]
+        d_index: Dict[frozenset, int] = {frozenset(start_closure): 0}
+        d_trans: Dict[Tuple[int, str], int] = {}
+
+        work = [start_closure]
+        # iterar etiquetas en orden para reproducibilidad
+        sorted_labels = sorted(labels)
+
+        while work:
+            S = work.pop(0)
+            sid = d_index[frozenset(S)]
+            for a in sorted_labels:
+                m = move(S, a)
+                if not m:
+                    continue
+                C = epsilon_closure(m)
+                key = frozenset(C)
+                if key not in d_index:
+                    nid = len(d_states)
+                    d_index[key] = nid
+                    d_states.append(C)
+                    work.append(C)
+                else:
+                    nid = d_index[key]
+                d_trans[(sid, a)] = nid
+
+        # identificar estados de aceptación (contienen S' -> ... . , $)
+        d_accept: Set[int] = set()
+        for i, st in enumerate(d_states):
+            for it in st:
+                if it.left == self.S_ and it.at_end() and it.look == END:
+                    d_accept.add(i)
+                    break
+
+        dfa = DFA(states=d_states, trans=d_trans, start=0, accept=d_accept, labels=set(sorted_labels), index=d_index)
+
+        return dfa
+
+    def build_tables(self):
+        """
+        Construye ACTION y GOTO usando el AFD almacenado en self.dfa.
+
+        Parámetros:
+            use_dfa_transitions: si True utiliza directamente dfa.trans para SHIFT y GOTO.
+                                 si False, usa dfa.trans para SHIFT y calcula GOTO con self.goto().
+            ensure_dfa: si True, construye self.dfa si no existe (llama a build_dfa()).
+
+        Retorna:
+            ACTION, GOTO, dfa.states
+        """
+
+        dfa = self.dfa
+        ACTION: Dict[Tuple[int, str], Tuple[str, int | Production | None]] = {}
+        GOTO: Dict[Tuple[int, str], int] = {}
+
+        # --- 1) SHIFTS y REDUCE/ACCEPT por ítems en cada estado del DFA ---
+        for i, I in enumerate(dfa.states):
+            # (A) Si usamos dfa.trans para shifts, aplicamos esas transiciones
+            # recorremos todas las transiciones que parten de i
+            for (s, label), j in dfa.trans.items():
+                if s != i:
+                    continue
+                # shift sólo para terminales
+                if label in self.T:
+                    self._set_action(ACTION, i, label, ("shift", j))
+            # las reducciones/accept deben revisarse por los ítems contenidos en I
+            for it in I:
+                if it.at_end():
+                    if it.left == self.S_ and it.look == END:
+                        self._set_action(ACTION, i, END, ("accept", None))
+                    else:
+                        prod = Production(it.left, list(it.right))
+                        self._set_action(ACTION, i, it.look, ("reduce", prod))
+
+        # --- 2) GOTO: preferir transiciones del DFA (si están), o calcular con goto() ---
+        for (s, label), j in dfa.trans.items():
+            if label in self.N:
+                GOTO[(s, label)] = j
+        
+        return ACTION, GOTO, dfa.states
 
 class LR1Parser:
     def __init__(self, builder: LR1Builder):
@@ -343,72 +409,3 @@ class LR1Parser:
                 return True
             else:
                 raise RuntimeError("Acción desconocida")
-
-
-def _prod_str(p) -> str:
-    rhs = " ".join(p.right) if p.right else "ε"
-    return f"{p.left} → {rhs}"
-
-def print_lr1_tables(builder, show_states: bool = False) -> None:
-    
-    ACTION, GOTO, states = builder.build_tables()
-
-    terms = sorted(builder.T)                          # incluye $
-    nonterms = sorted(builder.N - {builder.S_})        # excluye S'
-
-    width_state = 6
-    width_cell = 14
-
-    # ----- ACTION -----
-    print("\n=== ACTION ===")
-    print(f"{'state':<{width_state}}", end="")
-    for a in terms:
-        print(f"{a:<{width_cell}}", end="")
-    print()
-    print("-" * (width_state + width_cell * len(terms)))
-
-    for i, _ in enumerate(states):
-        print(f"{i:<{width_state}}", end="")
-        for a in terms:
-            cell = ACTION.get((i, a))
-            if cell is None:
-                out = "-"
-            else:
-                kind, data = cell
-                if kind == "shift":
-                    out = f"s{data}"
-                elif kind == "reduce":
-                    out = "r(" + _prod_str(data) + ")"
-                elif kind == "accept":
-                    out = "acc"
-                else:
-                    out = "?"
-            print(f"{out:<{width_cell}}", end="")
-        print()
-
-    # ----- GOTO -----
-    print("\n=== GOTO ===")
-    print(f"{'state':<{width_state}}", end="")
-    for A in nonterms:
-        print(f"{A:<{width_cell}}", end="")
-    print()
-    print("-" * (width_state + width_cell * len(nonterms)))
-
-    for i, _ in enumerate(states):
-        print(f"{i:<{width_state}}", end="")
-        for A in nonterms:
-            j = GOTO.get((i, A))
-            out = "-" if j is None else str(j)
-            print(f"{out:<{width_cell}}", end="")
-        print()
-
-    if show_states:
-        print("\n=== Estados (ítems LR(1)) ===")
-        for i, I in enumerate(states):
-            print(f"State {i}:")
-            for it in sorted(I, key=lambda x: (x.left, x.right, x.dot, x.look)):
-                right = list(it.right)
-                right.insert(it.dot, "·")
-                body = " ".join(right) if right else "·"
-                print(f"  {it.left} -> {body} , {it.look}")
-            print()
