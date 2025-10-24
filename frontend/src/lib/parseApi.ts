@@ -3,7 +3,12 @@ const API = "http://localhost:8000";
 export type BuildResponse = {
   states: string[][];
   transitions: Record<string, number>;
-  action: Record<string, { kind: "shift"; to: number } | { kind: "reduce"; prod:{left:string; right:string[]} } | { kind: "accept" }>;
+  action: Record<
+    string,
+    | { kind: "shift"; to: number }
+    | { kind: "reduce"; prod: { left: string; right: string[] } }
+    | { kind: "accept" }
+  >;
   goto: Record<string, number>;
   nonTerminals: string[];
   firsts: Record<string, string[]>;
@@ -15,10 +20,9 @@ export type ParseResponse = {
 };
 
 export async function buildOnServer(rules: string): Promise<BuildResponse> {
-  console.log("Building on server with rules:", rules);
   const res = await fetch(`${API}/build`, {
     method: "POST",
-    headers: {"Content-Type":"application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rules }),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -28,15 +32,15 @@ export async function buildOnServer(rules: string): Promise<BuildResponse> {
 export async function parseOnServer(input: string, rules: string): Promise<ParseResponse> {
   const res = await fetch(`${API}/parse`, {
     method: "POST",
-    headers: {"Content-Type":"application/json"},
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ input, rules }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
-export async function downloadAutomatonPNG(grammar: string) {
-  const res = await fetch(`${API}/automaton/png`, {
+export async function downloadAutomatonPNG(grammar: string, detail: "simple" | "items" = "simple") {
+  const res = await fetch(`${API}/automaton/dfa/png?detail=${detail}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rules: grammar }),
@@ -55,20 +59,20 @@ export async function downloadAutomatonPNG(grammar: string) {
 
 
 export async function fetchAutomaton(
-  kind: "svg" | "png",
+  _kind: "svg" | "png",               
   grammar: string,
   detail: "simple" | "items" | "nfa" = "simple"
 ): Promise<Blob> {
   const endpoint =
     detail === "nfa"
-      ? `/automaton/nfa/${kind}`   // 🔹 nuevo endpoint
-      : `/automaton/${kind}?detail=${detail}`;
-  
-  const res = await fetch(`${API}${endpoint}`, {
+      ? `${API}/automaton/nfa/png`
+      : `${API}/automaton/dfa/png?detail=${detail}`;
+
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rules: grammar }),
   });
   if (!res.ok) throw new Error(await res.text());
-  return await res.blob();
+  return res.blob();
 }

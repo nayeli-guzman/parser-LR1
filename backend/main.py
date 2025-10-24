@@ -80,7 +80,7 @@ def parse_grammar(grammar_str: str):
             self._b = builder
 
         def get_tables(self):
-            ACTION, GOTO, _states = self._b.tables()
+            ACTION, GOTO, _states = self._b.build_tables()
             return ACTION, GOTO
         
         def get_afn(self):

@@ -336,7 +336,7 @@ class LR1Builder:
             ACTION, GOTO, dfa.states
         """
 
-        dfa = self.dfa
+        dfa = self.afd
         ACTION: Dict[Tuple[int, str], Tuple[str, int | Production | None]] = {}
         GOTO: Dict[Tuple[int, str], int] = {}
 
